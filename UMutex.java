@@ -6,6 +6,8 @@ import com.coreos.jetcd.op.Cmp;
 import com.coreos.jetcd.op.CmpTarget;
 import com.coreos.jetcd.op.Op;
 import com.coreos.jetcd.options.GetOption;
+import com.coreos.jetcd.options.GetOption.SortOrder;
+import com.coreos.jetcd.options.GetOption.SortTarget;
 import com.coreos.jetcd.options.PutOption;
 
 public class UMutex extends Mutex {
@@ -16,21 +18,27 @@ public class UMutex extends Mutex {
   public void lock() {
     Client client = this.session.getClient();
     key = pfx + session.getLease();
-    final Cmp CMP = new Cmp(ByteSequence.fromString(key), Cmp.Op.EQUAL,
-    	      CmpTarget.createRevision(0));    
+    
+    final Cmp CMP = new Cmp(ByteSequence.fromString(key), 
+            Cmp.Op.EQUAL,CmpTarget.createRevision(0));    
     final Op put = Op.put(ByteSequence.fromString(key), ByteSequence.fromString(""), 
-    		PutOption.newBuilder().withLeaseId(session.getLease()).build());
+            PutOption.newBuilder().withLeaseId(session.getLease()).build());
     final Op get = Op.get(ByteSequence.fromString(key), GetOption.DEFAULT);
-    final Op getOwner = Op.get(key, option)
-    
-    
+    final Op getOwner = Op.get(ByteSequence.fromString(key), withFirstCreate());
   }
-  
+
   public void unlock() {
 
   }
-
+  
   public boolean isOwner() {
     return true;
+  }
+  
+  private GetOption withFirstCreate() {
+    return GetOption.newBuilder().withLimit(1)
+        .withSortOrder(SortOrder.ASCEND)
+        .withSortField(SortTarget.CREATE)
+        .withPrefix(ByteSequence.fromString(pfx)).build();
   }
 }
