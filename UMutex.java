@@ -2,9 +2,13 @@ package com.coreos.jetcd.concurrency;
 
 import com.coreos.jetcd.Client;
 import com.coreos.jetcd.KV;
+import com.coreos.jetcd.Watch.Watcher;
 import com.coreos.jetcd.data.ByteSequence;
 import com.coreos.jetcd.data.KeyValue;
 import com.coreos.jetcd.data.Response.Header;
+import com.coreos.jetcd.exception.CompactedException;
+import com.coreos.jetcd.exception.EtcdException;
+import com.coreos.jetcd.exception.EtcdExceptionFactory;
 import com.coreos.jetcd.kv.GetResponse;
 import com.coreos.jetcd.kv.TxnResponse;
 import com.coreos.jetcd.op.Cmp;
@@ -14,6 +18,10 @@ import com.coreos.jetcd.options.GetOption;
 import com.coreos.jetcd.options.GetOption.SortOrder;
 import com.coreos.jetcd.options.GetOption.SortTarget;
 import com.coreos.jetcd.options.PutOption;
+import com.coreos.jetcd.options.WatchOption;
+import com.coreos.jetcd.watch.WatchResponse;
+import com.coreos.jetcd.watch.WatchEvent.EventType;
+
 import java.lang.InterruptedException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -24,7 +32,7 @@ public class UMutex extends Mutex {
     super(prefix, session);
   }
 
-  public boolean lock() throws ExecutionException, InterruptedException {
+  public boolean lock() throws ExecutionException, InterruptedException, EtcdException{
     Client client = this.session.getClient();
     KV kvclient = client.getKVClient();
     key = pfx + "/update/" + session.getLease();
@@ -35,7 +43,7 @@ public class UMutex extends Mutex {
             PutOption.newBuilder().withLeaseId(session.getLease()).build());
     final Op get = Op.get(ByteSequence.fromString(key), GetOption.DEFAULT);
     
-    final Op[] getOwner = getOwnerOps();
+    final Op[] getOwner = getOpsforFindingOwner();
     final Op[] thenOps = concat(put, getOwner);
     final Op[] elseOps = concat(get, getOwner);
     
@@ -63,7 +71,7 @@ public class UMutex extends Mutex {
       return true;
     }
     
-    
+    header = waitForPredecessor(revision - 1, client);  
     return true;
     
   }
@@ -76,7 +84,67 @@ public class UMutex extends Mutex {
     return true;
   }
   
-  private Op[] getOwnerOps() {
+  
+  private void watchPredecessor(String key, Client client, long revision) 
+               throws CompactedException, EtcdException {
+    
+    Watcher watcher = client.getWatchClient().watch(ByteSequence.fromString(key), 
+                      WatchOption.newBuilder().withRevision(revision).withNoPut(true).build());
+    
+    try {
+      
+      WatchResponse watchRes = watcher.listen();
+      if (watchRes.getEvents().get(0).getEventType().equals(EventType.DELETE)) {
+        return;
+      }
+      throw EtcdExceptionFactory.newEtcdException("lost watcher waiting for delete");
+      
+    } finally {
+      watcher.close();
+    }
+  }
+  
+  private Header waitForPredecessor(long maxCreateRev, Client client) 
+      throws InterruptedException, ExecutionException, EtcdException {
+    String pfxUpdate = pfx + "/update/";
+    String pfxInsert = pfx + "/insert/";
+    KeyValue predecessor;
+    Header header = null;
+    
+    CompletableFuture<GetResponse> updateFuture = client.getKVClient().get(
+        ByteSequence.fromString(pfxUpdate), withLastMaxCreate(pfxUpdate, maxCreateRev));
+    
+    CompletableFuture<GetResponse> insertFuture = client.getKVClient().get(
+        ByteSequence.fromString(pfxInsert), withLastMaxCreate(pfxInsert, maxCreateRev));
+    
+    GetResponse resUpdate = updateFuture.get();
+    GetResponse resInsert = insertFuture.get();
+    
+    if (resUpdate.getKvs().size() == 0) {
+      if (resInsert.getKvs().size() == 0) {
+        return resInsert.getHeader();
+      }
+      predecessor = resInsert.getKvs().get(0);
+      header = resInsert.getHeader();
+    } else {
+      long updateCreateRev = resUpdate.getKvs().get(0).getCreateRevision();
+      if (resInsert.getKvs().size() == 0 
+          || resInsert.getKvs().get(0).getCreateRevision() < updateCreateRev) {
+        predecessor = resUpdate.getKvs().get(0);
+        header = resUpdate.getHeader();
+      } else {
+        predecessor = resInsert.getKvs().get(0);
+        header = resInsert.getHeader();
+      }
+    }
+    
+    /*now we have found the predecessor to set a watch on*/
+    watchPredecessor(predecessor.getKey().toString(), client, header.getRevision());
+
+    return header;    
+  }
+  
+  private Op[] getOpsforFindingOwner() {
     Op[] getLockDelete = searchForDeleteLock();
     Op getOwnerUpdate = getOpWithFirstCreate(pfx + "/update/");
     Op getOwnerInsert = getOpWithFirstCreate(pfx + "/insert/");
@@ -124,13 +192,13 @@ public class UMutex extends Mutex {
     }
     return ownerKV;
   }
-
   
   private Op getOpWithFirstCreate(String prefix) {
     return Op.get(ByteSequence.fromString(prefix), 
               withFirstCreate(prefix));
   }
   
+
   private GetOption withFirstCreate(String prefix) {
     return GetOption.newBuilder().withLimit(1)
         .withSortOrder(SortOrder.ASCEND)
@@ -138,5 +206,11 @@ public class UMutex extends Mutex {
         .withPrefix(ByteSequence.fromString(pfx)).build();
   }
   
-  
-}
+  private GetOption withLastMaxCreate(String prefix, long maxcreateRev) {
+    return GetOption.newBuilder().withLimit(1)
+        .withSortOrder(SortOrder.DESCEND)
+        .withSortField(SortTarget.CREATE)
+        .withPrefix(ByteSequence.fromString(pfx))
+        .withMaxCreateRevision(maxcreateRev)
+        .build();
+  }
