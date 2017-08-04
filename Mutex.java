@@ -46,7 +46,7 @@ public abstract class Mutex {
   
   public abstract boolean lock() throws Exception;
   
-  public abstract void unlock();
+  public abstract void unlock() throws Exception;
   
   public abstract boolean isOwner();
   
