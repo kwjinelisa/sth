@@ -19,8 +19,8 @@ import com.coreos.jetcd.options.GetOption.SortOrder;
 import com.coreos.jetcd.options.GetOption.SortTarget;
 import com.coreos.jetcd.options.PutOption;
 import com.coreos.jetcd.options.WatchOption;
-import com.coreos.jetcd.watch.WatchResponse;
 import com.coreos.jetcd.watch.WatchEvent.EventType;
+import com.coreos.jetcd.watch.WatchResponse;
 
 import java.lang.InterruptedException;
 import java.util.List;
@@ -32,7 +32,7 @@ public class UMutex extends Mutex {
     super(prefix, session);
   }
 
-  public boolean lock() throws ExecutionException, InterruptedException, EtcdException{
+  public boolean lock() throws ExecutionException, InterruptedException, EtcdException {
     Client client = this.session.getClient();
     KV kvclient = client.getKVClient();
     key = pfx + "/update/" + session.getLease();
@@ -63,6 +63,7 @@ public class UMutex extends Mutex {
     /*if a Delete lock encompassing our update lock was found, 
      * cancel our lock by returning false */
     if (ownerKV != null && ownerKV.getKey().toString().contains("/Delete/")) {
+      unlock();
       return false;
     }
     
@@ -76,8 +77,12 @@ public class UMutex extends Mutex {
     
   }
 
-  public void unlock() {
-
+  public void unlock() throws InterruptedException, ExecutionException {
+    Client client = session.getClient();
+    KV kvclient = client.getKVClient();
+    kvclient.delete(ByteSequence.fromString(key)).get();
+    key = null;
+    revision = -1;    
   }
   
   public boolean isOwner() {
