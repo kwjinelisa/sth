@@ -48,6 +48,8 @@ public class Session {
     }
   }
   
+  
+  
   private Session(long lease, AtomicReference<Client> client, int ttl) 
       throws InterruptedException, ExecutionException {
     this.etcdclient = client;
@@ -70,6 +72,10 @@ public class Session {
     } catch (InterruptedException | ExecutionException e) {
       throw EtcdExceptionFactory.newEtcdException("Exception when revoking lease " + lease);
     }
+  }
+  
+  public void closeListener() {
+    listener.close();
   }
   
   public Client getClient() {
