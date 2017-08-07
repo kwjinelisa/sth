@@ -69,24 +69,27 @@ public class UMutex extends Mutex {
     
     if (ownerKV == null || ownerKV.getCreateRevision() == revision) {
       header = txnRes.getHeader();
+      isOwner = true;
       return true;
     }
     
-    header = waitForPredecessor(revision - 1, client);  
-    return true;
-    
+    header = waitForPredecessor(revision - 1, client); 
+    isOwner = true;
+    return true; 
   }
 
   public void unlock() throws InterruptedException, ExecutionException {
+    session.closeListener();
     Client client = session.getClient();
     KV kvclient = client.getKVClient();
     kvclient.delete(ByteSequence.fromString(key)).get();
     key = null;
-    revision = -1;    
+    revision = -1;
+    isOwner = false;
   }
   
   public boolean isOwner() {
-    return true;
+    return isOwner;
   }
   
   
@@ -113,40 +116,37 @@ public class UMutex extends Mutex {
       throws InterruptedException, ExecutionException, EtcdException {
     String pfxUpdate = pfx + "/update/";
     String pfxInsert = pfx + "/insert/";
-    KeyValue predecessor;
-    Header header = null;
+    GetOption optionU = withLastMaxCreate(pfxUpdate, maxCreateRev);
+    GetOption optionI = withLastMaxCreate(pfxInsert, maxCreateRev);
     
-    CompletableFuture<GetResponse> updateFuture = client.getKVClient().get(
-        ByteSequence.fromString(pfxUpdate), withLastMaxCreate(pfxUpdate, maxCreateRev));
-    
-    CompletableFuture<GetResponse> insertFuture = client.getKVClient().get(
-        ByteSequence.fromString(pfxInsert), withLastMaxCreate(pfxInsert, maxCreateRev));
-    
-    GetResponse resUpdate = updateFuture.get();
-    GetResponse resInsert = insertFuture.get();
-    
-    if (resUpdate.getKvs().size() == 0) {
-      if (resInsert.getKvs().size() == 0) {
-        return resInsert.getHeader();
-      }
-      predecessor = resInsert.getKvs().get(0);
-      header = resInsert.getHeader();
-    } else {
-      long updateCreateRev = resUpdate.getKvs().get(0).getCreateRevision();
-      if (resInsert.getKvs().size() == 0 
-          || resInsert.getKvs().get(0).getCreateRevision() < updateCreateRev) {
-        predecessor = resUpdate.getKvs().get(0);
-        header = resUpdate.getHeader();
-      } else {
+    while (true) {
+      KeyValue predecessor;
+      CompletableFuture<GetResponse> updateFuture = client.getKVClient().get(
+          ByteSequence.fromString(pfxUpdate), optionU);
+      
+      CompletableFuture<GetResponse> insertFuture = client.getKVClient().get(
+          ByteSequence.fromString(pfxInsert), optionI);
+      GetResponse resUpdate = updateFuture.get();
+      GetResponse resInsert = insertFuture.get();
+      
+      if (resUpdate.getKvs().size() == 0) {
+        /*if no one prior, the lock is ours*/
+        if (resInsert.getKvs().size() == 0) {
+          return resInsert.getHeader();
+        }
         predecessor = resInsert.getKvs().get(0);
-        header = resInsert.getHeader();
+      } else {
+        long updateCreateRev = resUpdate.getKvs().get(0).getCreateRevision();
+        if (resInsert.getKvs().size() == 0 
+            || resInsert.getKvs().get(0).getCreateRevision() < updateCreateRev) {
+          predecessor = resUpdate.getKvs().get(0);
+        } else {
+          predecessor = resInsert.getKvs().get(0);
+        }
       }
+      /*now we have found the predecessor to set a watch on*/
+      watchPredecessor(predecessor.getKey().toString(), client, header.getRevision());      
     }
-    
-    /*now we have found the predecessor to set a watch on*/
-    watchPredecessor(predecessor.getKey().toString(), client, header.getRevision());
-
-    return header;    
   }
   
   private Op[] getOpsforFindingOwner() {
@@ -219,3 +219,4 @@ public class UMutex extends Mutex {
         .withMaxCreateRevision(maxcreateRev)
         .build();
   }
+}
