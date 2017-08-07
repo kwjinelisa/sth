@@ -9,6 +9,7 @@ public abstract class Mutex {
   protected long revision;
   protected Session session;
   protected Header header;
+  protected boolean isOwner;
   
   public Mutex(String prefix, Session session) {
     this.pfx = prefix;
