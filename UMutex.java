@@ -74,6 +74,12 @@ public class UMutex extends Mutex {
     }
     
     header = waitForPredecessor(revision - 1, client); 
+    
+    if (kvclient.get(ByteSequence.fromString(key)).get().getKvs().size() == 0) {
+      this.unlock();
+      throw EtcdExceptionFactory.newEtcdException("the lock got deleted during the lock() function "
+          + "probably due to inactive session, renounce or retry");
+    }
     isOwner = true;
     return true; 
   }
@@ -98,7 +104,6 @@ public class UMutex extends Mutex {
     
     Watcher watcher = client.getWatchClient().watch(ByteSequence.fromString(key), 
                       WatchOption.newBuilder().withRevision(revision).withNoPut(true).build());
-    
     try {
       
       WatchResponse watchRes = watcher.listen();

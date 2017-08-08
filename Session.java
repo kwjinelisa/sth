@@ -12,7 +12,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class Session {
-  public static int defaultSessionTTL = 60;
+  public static int defaultSessionTTL = 10;
   
   private AtomicReference<Client> etcdclient;
   private long lease;
@@ -69,6 +69,7 @@ public class Session {
       future.get(ttl,TimeUnit.SECONDS);
     } catch (TimeoutException e) {
       // if revoke takes longer than the ttl, lease is expired anyway
+      return;
     } catch (InterruptedException | ExecutionException e) {
       throw EtcdExceptionFactory.newEtcdException("Exception when revoking lease " + lease);
     }

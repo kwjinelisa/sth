@@ -16,20 +16,16 @@ public abstract class Mutex {
     this.session = session;
   }
 
-  public void setRev(long revision) {
-    this.revision = revision;
-  }
-
   public long getRev() {
     return this.revision;
   }
 
-  public void setKey(String key) {
-    this.key = key;
-  }
-
   public String getKey() {
     return this.key;
+  }
+  
+  public Session getSession() {
+    return this.session;
   }
   
   protected Op[] concat(Op[] a, Op... b) {
