@@ -21,6 +21,7 @@ import com.coreos.jetcd.Client;
 import com.coreos.jetcd.ClientBuilder;
 import com.coreos.jetcd.Watch.Watcher;
 import com.coreos.jetcd.data.ByteSequence;
+import com.coreos.jetcd.exception.EtcdException;
 import com.coreos.jetcd.internal.impl.TestConstants;
 import com.coreos.jetcd.options.WatchOption;
 import com.coreos.jetcd.watch.WatchEvent;
@@ -44,6 +45,18 @@ public abstract class AbstractConcurrencyTest {
     this.client.close();
   }
 
+  protected Thread newLockThread(Mutex m, boolean toBeCancelled) {
+    return new Thread(() -> {
+      try {
+        test.assertEquals(m.lock(), !toBeCancelled);
+      } catch (EtcdException e) {
+        System.out.println(e.getMessage());
+      } catch (Exception e) {
+        e.printStackTrace();
+      }
+    });
+  }
+  
   protected Watcher newWatcherwithPfxRev(ByteSequence prefix, long revision) {
     return client.getWatchClient().watch(prefix, 
         WatchOption.newBuilder().withPrefix(prefix).withRevision(revision).build());

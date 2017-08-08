@@ -16,7 +16,6 @@ import org.testng.annotations.Test;
 
 import com.coreos.jetcd.Watch.Watcher;
 import com.coreos.jetcd.data.ByteSequence;
-import com.coreos.jetcd.watch.WatchEvent;
 import com.coreos.jetcd.watch.WatchEvent.EventType;
 
 
@@ -37,11 +36,22 @@ public class WatchDeleteTest extends AbstractConcurrencyTest {
     ExecutorService executor = Executors.newSingleThreadExecutor();
     getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
     
-    /*put the second key and verify from watcher*/
+    /*put the second key*/
     client.getKVClient().put(KEY2, ByteSequence.fromString("")).get();
     getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
     
+    Mutex owner = newUMutexfromClient(client, path);
+    Thread ownerlockThread = newLockThread(owner, false);
+    ownerlockThread.start();
+    getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
     
-
+    client.getKVClient().delete(KEY2).get();
+    getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.DELETE);
+    
+    test.assertTrue(ownerlockThread.isAlive());
+    
+    client.getKVClient().delete(KEY1).get();
+    ownerlockThread.join(1000);
+    test.assertTrue(owner.isOwner());
   }
 }
