@@ -36,6 +36,7 @@ public class UMutex extends Mutex {
     Client client = this.session.getClient();
     KV kvclient = client.getKVClient();
     key = pfx + "/update/" + session.getLease();
+    //key = pfx + "/update/" + 3000;
     
     final Cmp CMP = new Cmp(ByteSequence.fromString(key), 
             Cmp.Op.EQUAL,CmpTarget.createRevision(0));    
@@ -46,7 +47,7 @@ public class UMutex extends Mutex {
     final Op[] getOwner = getOpsforFindingOwner();
     final Op[] thenOps = concat(put, getOwner);
     final Op[] elseOps = concat(get, getOwner);
-    
+
     CompletableFuture<TxnResponse> txnFuture = kvclient.txn()
             .If(CMP).Then(thenOps).Else(elseOps).commit();
     
@@ -126,6 +127,7 @@ public class UMutex extends Mutex {
     
     while (true) {
       KeyValue predecessor;
+      long resRev;;
       CompletableFuture<GetResponse> updateFuture = client.getKVClient().get(
           ByteSequence.fromString(pfxUpdate), optionU);
       
@@ -140,17 +142,21 @@ public class UMutex extends Mutex {
           return resInsert.getHeader();
         }
         predecessor = resInsert.getKvs().get(0);
+        resRev = resInsert.getHeader().getRevision();
       } else {
         long updateCreateRev = resUpdate.getKvs().get(0).getCreateRevision();
         if (resInsert.getKvs().size() == 0 
             || resInsert.getKvs().get(0).getCreateRevision() < updateCreateRev) {
           predecessor = resUpdate.getKvs().get(0);
+          resRev = resUpdate.getHeader().getRevision();
         } else {
           predecessor = resInsert.getKvs().get(0);
+          resRev = resInsert.getHeader().getRevision();
+
         }
       }
       /*now we have found the predecessor to set a watch on*/
-      watchPredecessor(predecessor.getKey().toString(), client, header.getRevision());      
+      watchPredecessor(predecessor.getKey().toString(), client, resRev);      
     }
   }
   
@@ -167,11 +173,11 @@ public class UMutex extends Mutex {
     Op[] getLockDelete = new Op[len + 1];
     
     String start = "";
-    getLockDelete[0] = getOpWithFirstCreate(start + "/delete/");
+    getLockDelete[0] = getOpWithFirstCreate(start + "delete/");
 
     for (int i = 0;i < len;i++) {
-      start = start + parts[i];
-      String prefix = start + "/delete/";
+      start = start + parts[i] + "/";
+      String prefix = start + "delete/";
       getLockDelete[i + 1] = getOpWithFirstCreate(prefix);
     }
     return getLockDelete;
@@ -213,14 +219,14 @@ public class UMutex extends Mutex {
     return GetOption.newBuilder().withLimit(1)
         .withSortOrder(SortOrder.ASCEND)
         .withSortField(SortTarget.CREATE)
-        .withPrefix(ByteSequence.fromString(pfx)).build();
+        .withPrefix(ByteSequence.fromString(prefix)).build();
   }
   
   private GetOption withLastMaxCreate(String prefix, long maxcreateRev) {
     return GetOption.newBuilder().withLimit(1)
         .withSortOrder(SortOrder.DESCEND)
         .withSortField(SortTarget.CREATE)
-        .withPrefix(ByteSequence.fromString(pfx))
+        .withPrefix(ByteSequence.fromString(prefix))
         .withMaxCreateRevision(maxcreateRev)
         .build();
   }

@@ -9,6 +9,7 @@ package com.coreos.jetcd.concurrency;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -44,11 +45,12 @@ public abstract class AbstractConcurrencyTest {
   public void tearDown() {
     this.client.close();
   }
-
+  
   protected Thread newLockThread(Mutex m, boolean toBeCancelled) {
     return new Thread(() -> {
       try {
-        test.assertEquals(m.lock(), !toBeCancelled);
+        boolean result = m.lock();
+        test.assertEquals(!result, toBeCancelled);
       } catch (EtcdException e) {
         System.out.println(e.getMessage());
       } catch (Exception e) {
@@ -57,22 +59,31 @@ public abstract class AbstractConcurrencyTest {
     });
   }
   
+  protected void deleteAndVerify(ByteSequence keyToDelete, Watcher watcher, 
+                                  ExecutorService executor, int numToDelete) throws Exception {
+    client.getKVClient().delete(keyToDelete).get();
+    getEventsFromWatcherAndVerify(watcher, executor, numToDelete, EventType.DELETE);
+  }
+  
   protected Watcher newWatcherwithPfxRev(ByteSequence prefix, long revision) {
     return client.getWatchClient().watch(prefix, 
         WatchOption.newBuilder().withPrefix(prefix).withRevision(revision).build());
   }
   
-  protected void getEventsFromWatcherAndVerify(Watcher watcher, 
+  protected List<WatchEvent> getEventsFromWatcherAndVerify(Watcher watcher, 
       ExecutorService executor, int numEvents, EventType type) throws Exception {
     List<WatchEvent> eventList = getEventsFromWatcher(watcher, executor, numEvents);
     test.assertEquals(eventList.size(), numEvents);
     for (WatchEvent event:eventList) {
       test.assertEquals(event.getEventType(),type);
     }
+    return eventList;
   }
   
   private List<WatchEvent> getEventsFromWatcher(Watcher watcher, 
       ExecutorService executor, int numEvents) throws Exception {
+    
+    
     Future<List<WatchEvent>> future = executor.submit(() -> {
       int count = 0;
       List<WatchEvent> events = new ArrayList();

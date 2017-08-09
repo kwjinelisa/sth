@@ -12,7 +12,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class Session {
-  public static int defaultSessionTTL = 10;
+  public static int defaultSessionTTL = 60;
   
   private AtomicReference<Client> etcdclient;
   private long lease;

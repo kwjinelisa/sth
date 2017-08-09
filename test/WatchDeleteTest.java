@@ -16,6 +16,10 @@ import org.testng.annotations.Test;
 
 import com.coreos.jetcd.Watch.Watcher;
 import com.coreos.jetcd.data.ByteSequence;
+import com.coreos.jetcd.kv.PutResponse;
+import com.coreos.jetcd.options.GetOption;
+import com.coreos.jetcd.options.PutOption;
+import com.coreos.jetcd.watch.WatchEvent;
 import com.coreos.jetcd.watch.WatchEvent.EventType;
 
 
@@ -27,17 +31,49 @@ public class WatchDeleteTest extends AbstractConcurrencyTest {
   private static final ByteSequence KEY2 = ByteSequence.fromString(key2);
   
   @Test
-  public void testPredecessorChange() throws Exception{
-    /*put the first key*/
+  /*the simplest scenario where the mutex waits for 
+   * the current owner's deletion in order to become the owner*/
+  public void testOneInFront() throws Exception{
+    /*simulate a owner in place by sending put*/
     long revision = client.getKVClient().put(KEY1, ByteSequence.fromString(""))
         .get().getHeader().getRevision();
+    /*verify the put operation from watcher*/
+    Watcher watcher =  newWatcherwithPfxRev(PATH, revision);
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    List<WatchEvent> list = getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
+    test.assertEquals(list.get(0).getKeyValue().getKey(), KEY1);
+    
+    /*try to lock the mutex*/
+    Mutex owner = newUMutexfromClient(client, path);
+    Thread ownerlockThread = newLockThread(owner, false);
+    ownerlockThread.start();
+    list = getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
+    test.assertEquals(list.get(0).getKeyValue().getKey(), ByteSequence.fromString(owner.getKey()));
+    //veirfy that the lock() has not returned
+    Thread.sleep(1000);
+    test.assertTrue(!owner.isOwner());
+    test.assertTrue(ownerlockThread.isAlive());
+    
+    //delete the current owner key
+    client.getKVClient().delete(KEY1).get();
+    getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.DELETE);
+    /*verify the mutex has now become the owner*/
+    ownerlockThread.join(1000);
+    test.assertTrue(owner.isOwner());
+  }
+  
+  @Test
+  public void testPredecessorChange() throws Exception{
+    /*put the first key*/
+    long lease = client.getLeaseClient().grant(60).get().getID();
+    long revision = putWithLease(KEY1, lease).getHeader().getRevision();
     /*verify the put operation from watcher*/
     Watcher watcher =  newWatcherwithPfxRev(PATH, revision);
     ExecutorService executor = Executors.newSingleThreadExecutor();
     getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
     
     /*put the second key*/
-    client.getKVClient().put(KEY2, ByteSequence.fromString("")).get();
+    putWithLease(KEY2,lease);
     getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
     
     Mutex owner = newUMutexfromClient(client, path);
@@ -47,11 +83,20 @@ public class WatchDeleteTest extends AbstractConcurrencyTest {
     
     client.getKVClient().delete(KEY2).get();
     getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.DELETE);
-    
+    Thread.sleep(1000);
     test.assertTrue(ownerlockThread.isAlive());
     
     client.getKVClient().delete(KEY1).get();
+    getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.DELETE);
     ownerlockThread.join(1000);
     test.assertTrue(owner.isOwner());
   }
+  
+  
+  private PutResponse putWithLease(ByteSequence key, long lease) throws InterruptedException, ExecutionException {
+   return client.getKVClient().put(KEY1, ByteSequence.fromString("")
+             ,PutOption.newBuilder().withLeaseId(lease).build()).get();
+  }
 }
+
+
