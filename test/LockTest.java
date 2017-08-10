@@ -62,13 +62,13 @@ public class LockTest {
   @Test
   public void test2Ulocks() throws Exception{
     Session firstOwnerSession = Session.newBuilder().setClient(client).build();
-    Mutex firstOwnerMutex = new UMutex(path, firstOwnerSession);
+    Mutex firstOwnerMutex = Mutex.newUMutex(path, firstOwnerSession);
     /*launch the first thread to lock the firstowner*/
     Thread firstOwnerThread = newLockThread(firstOwnerMutex, false);
     firstOwnerThread.start();
     
     Session secondOwnerSession = Session.newBuilder().setClient(client).build();
-    Mutex secondOwnerMutex = new UMutex(path, secondOwnerSession);
+    Mutex secondOwnerMutex = Mutex.newUMutex(path, secondOwnerSession);
     /*launch the second thread to lock the second owner, 
     which will be blocked until the unlocking of the first owner*/
     firstOwnerThread.join();
@@ -206,7 +206,7 @@ public class LockTest {
   private Mutex newMutexfromClient(Client client, String prefix)
       throws InterruptedException, ExecutionException{ 
     Session session = Session.newBuilder().setClient(client).build();
-    return new UMutex(prefix, session);
+    return  Mutex.newUMutex(prefix, session);
   }
   
   private Thread newLockThread(Mutex m, boolean toSucceed) {

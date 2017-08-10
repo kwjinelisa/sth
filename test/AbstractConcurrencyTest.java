@@ -102,7 +102,7 @@ public abstract class AbstractConcurrencyTest {
   }
   
   protected Mutex newUMutexfromClient(Client client, String prefix) throws InterruptedException, ExecutionException {
-    return newMutexfromClient(client, prefix, UMutex::new);
+    return newMutexfromClient(client, prefix, Mutex::newUMutex);
   }
   
   protected Mutex newMutexfromClient(Client client, String prefix, MutexFactory factory)

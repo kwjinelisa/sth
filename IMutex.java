@@ -1,3 +1,11 @@
+/*
+ * Copyright © 2017 CMCC and others.  All rights reserved.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License v1.0 which accompanies this distribution,
+ * and is available at http://www.eclipse.org/legal/epl-v10.html
+ */
+
 package com.coreos.jetcd.concurrency;
 
 import com.coreos.jetcd.Client;
@@ -16,63 +24,61 @@ import com.coreos.jetcd.op.Cmp;
 import com.coreos.jetcd.op.CmpTarget;
 import com.coreos.jetcd.op.Op;
 import com.coreos.jetcd.options.GetOption;
-import com.coreos.jetcd.options.GetOption.SortOrder;
-import com.coreos.jetcd.options.GetOption.SortTarget;
 import com.coreos.jetcd.options.PutOption;
 import com.coreos.jetcd.options.WatchOption;
 import com.coreos.jetcd.watch.WatchEvent.EventType;
 import com.coreos.jetcd.watch.WatchResponse;
-
-import java.lang.InterruptedException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
-public class UMutex extends Mutex {
-  
-  protected UMutex(String prefix, Session session, String lockType) {
+public class IMutex extends Mutex {
+
+  protected IMutex(String prefix, Session session, String lockType) {
     super(prefix,  session,  lockType);
   }
 
-  public boolean lock() throws ExecutionException, InterruptedException, EtcdException {
+  @Override
+  public boolean lock() throws Exception {
+    final Cmp CMP = new Cmp(mykkey, Cmp.Op.EQUAL,CmpTarget.createRevision(0));     
+    final Op put = Op.put(mykkey, ByteSequence.fromString(""), 
+        PutOption.newBuilder().withLeaseId(mysession.getLease()).build());
+    final Op get = Op.get(mykkey, GetOption.DEFAULT);
     
-    final Cmp CMP = new Cmp(ByteSequence.fromString(mykey), 
-            Cmp.Op.EQUAL,CmpTarget.createRevision(0));    
-    final Op put = Op.put(ByteSequence.fromString(mykey), ByteSequence.fromString(""), 
-            PutOption.newBuilder().withLeaseId(mysession.getLease()).build());
-    final Op get = Op.get(ByteSequence.fromString(mykey), GetOption.DEFAULT);
-    
-    final Op[] getOwner = getOpsforFindingOwner();
+    final Op[] getOwner = getAllContenders();
     final Op[] thenOps = concat(put, getOwner);
     final Op[] elseOps = concat(get, getOwner);
-
-    CompletableFuture<TxnResponse> txnFuture = myKvclient.txn()
-            .If(CMP).Then(thenOps).Else(elseOps).commit();
     
+    CompletableFuture<TxnResponse> txnFuture = myKvclient.txn()
+        .If(CMP).Then(thenOps).Else(elseOps).commit();
     TxnResponse txnRes = txnFuture.get();
     myrevision = txnRes.getHeader().getRevision();
-    int ownerIndex = 0;
+    int contenderStartingIndex = 0;
     
     if (!txnRes.isSucceeded()) {
-      ownerIndex = 1;
+      contenderStartingIndex = 1;
       myrevision = txnRes.getGetResponses().get(0).getKvs().get(0).getCreateRevision();
     }
     
-    KeyValue ownerKV = getOwnerKV(txnRes.getGetResponses(), ownerIndex);
+    
+    
+    KeyValue ownerKV = getOwnerKV(txnRes.getGetResponses(), contenderStartingIndex);
     /*if a Delete lock encompassing our update lock was found, 
      * cancel our lock by returning false */
-    if (ownerKV != null && ownerKV.getKey().toString().contains("/Delete/")) {
+    if (ownerKV != null && ownerKV.getKey().toString().contains("/delete/")) {
       unlock();
       return false;
     }
-    
+
     if (ownerKV == null || ownerKV.getCreateRevision() == myrevision) {
       header = txnRes.getHeader();
       isOwner = true;
       return true;
     }
     
-    header = waitForPredecessor(myrevision - 1, myclient); 
+    /* wait for contenders prior to me to go away to acquire the lock*/
+    header = waitForContendersToGo(myrevision - 1, myclient); 
+
     if (header == null) {
       this.unlock();
       throw EtcdExceptionFactory.newEtcdException("the lock got deleted during the lock() function "
@@ -81,50 +87,38 @@ public class UMutex extends Mutex {
 
     isOwner = true;
     return true; 
+    
   }
 
-  public void unlock() throws InterruptedException, ExecutionException {
+  @Override
+  public void unlock() throws Exception {
     mysession.closeListener();
     Client client = mysession.getClient();
     KV kvclient = client.getKVClient();
-    kvclient.delete(ByteSequence.fromString(mykey)).get();
+    kvclient.delete(mykkey).get();
     mykey = null;
+    mykkey = null;
     myrevision = -1;
     isOwner = false;
   }
-  
-  private void watchPredecessor(ByteSequence key, Client client, long revision) 
-               throws CompactedException, EtcdException {
-    
-    Watcher watcher = client.getWatchClient().watch(key, 
-                      WatchOption.newBuilder().withRevision(revision).withNoPut(true).build());
-    try {
-      WatchResponse watchRes = watcher.listen();
-      if (!watchRes.getEvents().get(0).getEventType().equals(EventType.DELETE)) {
-        throw EtcdExceptionFactory.newWatchLostException(key.toStringUtf8());
-      }
-    } finally {
-      watcher.close();
-    }
-  }
-  
-  private Header waitForPredecessor(long maxCreateRev, Client client) 
-      throws InterruptedException, ExecutionException, EtcdException {
 
+  private Header waitForContendersToGo(long maxCreateRev, Client client) 
+      throws InterruptedException, ExecutionException, EtcdException {
+    //my contenders are insertion and deletion locks in the same directory
     ByteSequence pfxUpdate = ByteSequence.fromString(myprefix + "/update/");
     ByteSequence pfxInsert = ByteSequence.fromString(myprefix + "/insert/");
     GetOption optionU = withLastMaxCreate(pfxUpdate, maxCreateRev);
     GetOption optionI = withLastMaxCreate(pfxInsert, maxCreateRev);
     
-    final Cmp CMP = new Cmp(ByteSequence.fromString(mykey), 
-        Cmp.Op.EQUAL,CmpTarget.createRevision(0));    
+    final Cmp CMP = new Cmp(mykkey, Cmp.Op.EQUAL,CmpTarget.createRevision(0));    
     Op getUpdate = Op.get(pfxUpdate, optionU);
     Op getInsert = Op.get(pfxInsert, optionI);
     
     while (true) {
       KeyValue predecessor;
       long resRev;
-      
+      /*to check if my key already gets deleted
+       * if it is the case, meaning the lock should be canceled*/
       CompletableFuture<TxnResponse> txnFuture = myKvclient.txn()
           .If(CMP).Then().Else(getUpdate, getInsert).commit();
       TxnResponse txnRes = txnFuture.get();
@@ -135,10 +129,14 @@ public class UMutex extends Mutex {
       }
       GetResponse resUpdate = txnRes.getGetResponses().get(0);
       GetResponse resInsert = txnRes.getGetResponses().get(1);
-      
+      /* to find if there are contenders prior to me 
+       * if yes, find the one immediately in front of me to set a watch on
+       * if no, then I should be the owner of the lock
+       */
       if (resUpdate.getKvs().size() == 0) {
         /*if no one prior, the lock is ours*/
         if (resInsert.getKvs().size() == 0) {
+          //no contender, return
           return resInsert.getHeader();
         }
         predecessor = resInsert.getKvs().get(0);
@@ -155,9 +153,9 @@ public class UMutex extends Mutex {
 
         }
       }
-      /*now we have found the predecessor to set a watch on*/
+      /*now we have found the contender to set a watch on*/
       try {
-        watchPredecessor(predecessor.getKey(), client, resRev);
+        setWatch(predecessor.getKey(), client, resRev);
       } catch (WatchLostException e) {
         /*if the watch got lost, no big deal, just continue with the loop and try again*/
         System.out.println(e.getMessage());
@@ -165,27 +163,19 @@ public class UMutex extends Mutex {
     }
   }
   
-  private Op[] getOpsforFindingOwner() {
-    Op[] getLockDelete = searchForDeleteLock();
-    Op getOwnerUpdate = opWithFirstCreate(myprefix + "/update/");
-    Op getOwnerInsert = opWithFirstCreate(myprefix + "/insert/");
-    return concat(getLockDelete, getOwnerUpdate, getOwnerInsert);
-  }
-  
-  private Op[] searchForDeleteLock() {
-    String[] parts = myprefix.split("/");
-    int len = parts.length;
-    Op[] getLockDelete = new Op[len + 1];
-    
-    String start = "";
-    getLockDelete[0] = opWithFirstCreate(start + "delete/");
-
-    for (int i = 0;i < len;i++) {
-      start = start + parts[i] + "/";
-      String prefix = start + "delete/";
-      getLockDelete[i + 1] = opWithFirstCreate(prefix);
+  private void setWatch(ByteSequence key, Client client, long revision) 
+      throws CompactedException, EtcdException {
+    /*wait for the contender to go away*/
+    Watcher watcher = client.getWatchClient().watch(key, 
+                 WatchOption.newBuilder().withRevision(revision).withNoPut(true).build());
+    try {
+      WatchResponse watchRes = watcher.listen();
+      if (!watchRes.getEvents().get(0).getEventType().equals(EventType.DELETE)) {
+        throw EtcdExceptionFactory.newWatchLostException(key.toStringUtf8());
+      }
+    } finally {
+      watcher.close();
     }
-    return getLockDelete;
   }
   
   private KeyValue getOwnerKV(List<GetResponse> getRes, int startIndex) {
@@ -212,5 +202,29 @@ public class UMutex extends Mutex {
       }
     }
     return ownerKV;
+  }
+  
+  
+  private Op[] getAllContenders() {
+    Op[] deleteOps = opsForDeletes();
+    Op updateOp = opWithFirstCreate(myprefix + "/update/");
+    Op insertOp = opWithFirstCreate(myprefix + "/insert/");
+    return concat(deleteOps, updateOp, insertOp);
+  }
+  
+  private Op[] opsForDeletes() {
+    String[] parts = myprefix.split("/");
+    int len = parts.length;
+    Op[] getLockDelete = new Op[len + 1];
+    
+    String start = "";
+    getLockDelete[0] = opWithFirstCreate(start + "delete/");
+
+    for (int i = 0;i < len;i++) {
+      start = start + parts[i] + "/";
+      String prefix = start + "delete/";
+      getLockDelete[i + 1] = opWithFirstCreate(prefix);
+    }
+    return getLockDelete;
   }
 }
