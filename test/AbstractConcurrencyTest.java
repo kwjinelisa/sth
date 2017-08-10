@@ -20,6 +20,7 @@ import org.testng.annotations.BeforeTest;
 import org.testng.asserts.Assertion;
 import com.coreos.jetcd.Client;
 import com.coreos.jetcd.ClientBuilder;
+import com.coreos.jetcd.KV;
 import com.coreos.jetcd.Watch.Watcher;
 import com.coreos.jetcd.data.ByteSequence;
 import com.coreos.jetcd.exception.EtcdException;
@@ -34,15 +35,18 @@ public abstract class AbstractConcurrencyTest {
   protected static final ByteSequence PATH = ByteSequence.fromString("root/dirA/dirB");
   protected Assertion test;
   protected Client client;
+  protected KV kvclient;
   
   @BeforeTest
   public void setUp() throws Exception {
     test = new Assertion();
     client = ClientBuilder.newBuilder().setEndpoints(TestConstants.endpoints).build();
+    kvclient = client.getKVClient();
   }
   
   @AfterTest
   public void tearDown() {
+    kvclient.close();
     this.client.close();
   }
   
@@ -50,7 +54,7 @@ public abstract class AbstractConcurrencyTest {
     return new Thread(() -> {
       try {
         boolean result = m.lock();
-        test.assertEquals(!result, toBeCancelled);
+        test.assertEquals(result, !toBeCancelled);
       } catch (EtcdException e) {
         System.out.println(e.getMessage());
       } catch (Exception e) {

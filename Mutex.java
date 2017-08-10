@@ -1,5 +1,6 @@
 package com.coreos.jetcd.concurrency;
 
+import com.coreos.jetcd.KV;
 import com.coreos.jetcd.data.Response.Header;
 import com.coreos.jetcd.op.Op;
 
@@ -10,6 +11,7 @@ public abstract class Mutex {
   protected Session session;
   protected Header header;
   protected boolean isOwner;
+  protected KV myKvclient;
   
   public Mutex(String prefix, Session session) {
     this.pfx = prefix;

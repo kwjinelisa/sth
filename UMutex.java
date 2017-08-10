@@ -9,6 +9,7 @@ import com.coreos.jetcd.data.Response.Header;
 import com.coreos.jetcd.exception.CompactedException;
 import com.coreos.jetcd.exception.EtcdException;
 import com.coreos.jetcd.exception.EtcdExceptionFactory;
+import com.coreos.jetcd.exception.WatchLostException;
 import com.coreos.jetcd.kv.GetResponse;
 import com.coreos.jetcd.kv.TxnResponse;
 import com.coreos.jetcd.op.Cmp;
@@ -34,7 +35,7 @@ public class UMutex extends Mutex {
 
   public boolean lock() throws ExecutionException, InterruptedException, EtcdException {
     Client client = this.session.getClient();
-    KV kvclient = client.getKVClient();
+    myKvclient = client.getKVClient();
     key = pfx + "/update/" + session.getLease();
     //key = pfx + "/update/" + 3000;
     
@@ -48,7 +49,7 @@ public class UMutex extends Mutex {
     final Op[] thenOps = concat(put, getOwner);
     final Op[] elseOps = concat(get, getOwner);
 
-    CompletableFuture<TxnResponse> txnFuture = kvclient.txn()
+    CompletableFuture<TxnResponse> txnFuture = myKvclient.txn()
             .If(CMP).Then(thenOps).Else(elseOps).commit();
     
     TxnResponse txnRes = txnFuture.get();
@@ -75,12 +76,12 @@ public class UMutex extends Mutex {
     }
     
     header = waitForPredecessor(revision - 1, client); 
-    
-    if (kvclient.get(ByteSequence.fromString(key)).get().getKvs().size() == 0) {
+    if (header == null) {
       this.unlock();
       throw EtcdExceptionFactory.newEtcdException("the lock got deleted during the lock() function "
           + "probably due to inactive session, renounce or retry");
     }
+
     isOwner = true;
     return true; 
   }
@@ -100,19 +101,16 @@ public class UMutex extends Mutex {
   }
   
   
-  private void watchPredecessor(String key, Client client, long revision) 
+  private void watchPredecessor(ByteSequence key, Client client, long revision) 
                throws CompactedException, EtcdException {
     
-    Watcher watcher = client.getWatchClient().watch(ByteSequence.fromString(key), 
+    Watcher watcher = client.getWatchClient().watch(key, 
                       WatchOption.newBuilder().withRevision(revision).withNoPut(true).build());
     try {
-      
       WatchResponse watchRes = watcher.listen();
-      if (watchRes.getEvents().get(0).getEventType().equals(EventType.DELETE)) {
-        return;
+      if (!watchRes.getEvents().get(0).getEventType().equals(EventType.DELETE)) {
+        throw EtcdExceptionFactory.newWatchLostException(key.toStringUtf8());
       }
-      throw EtcdExceptionFactory.newEtcdException("lost watcher waiting for delete");
-      
     } finally {
       watcher.close();
     }
@@ -120,21 +118,31 @@ public class UMutex extends Mutex {
   
   private Header waitForPredecessor(long maxCreateRev, Client client) 
       throws InterruptedException, ExecutionException, EtcdException {
-    String pfxUpdate = pfx + "/update/";
-    String pfxInsert = pfx + "/insert/";
+
+    ByteSequence pfxUpdate = ByteSequence.fromString(pfx + "/update/");
+    ByteSequence pfxInsert = ByteSequence.fromString(pfx + "/insert/");
     GetOption optionU = withLastMaxCreate(pfxUpdate, maxCreateRev);
     GetOption optionI = withLastMaxCreate(pfxInsert, maxCreateRev);
     
+    final Cmp CMP = new Cmp(ByteSequence.fromString(key), 
+        Cmp.Op.EQUAL,CmpTarget.createRevision(0));    
+    Op getUpdate = Op.get(pfxUpdate, optionU);
+    Op getInsert = Op.get(pfxInsert, optionI);
+    
     while (true) {
       KeyValue predecessor;
-      long resRev;;
-      CompletableFuture<GetResponse> updateFuture = client.getKVClient().get(
-          ByteSequence.fromString(pfxUpdate), optionU);
+      long resRev;
       
-      CompletableFuture<GetResponse> insertFuture = client.getKVClient().get(
-          ByteSequence.fromString(pfxInsert), optionI);
-      GetResponse resUpdate = updateFuture.get();
-      GetResponse resInsert = insertFuture.get();
+      CompletableFuture<TxnResponse> txnFuture = myKvclient.txn()
+          .If(CMP).Then().Else(getUpdate, getInsert).commit();
+      TxnResponse txnRes = txnFuture.get();
+      if (txnRes.isSucceeded()) {
+        /*the key representing this mutex has been deleted, probably due 
+         * to inactive session, thus we should abandon the locking operation*/
+        return null;
+      }
+      GetResponse resUpdate = txnRes.getGetResponses().get(0);
+      GetResponse resInsert = txnRes.getGetResponses().get(1);
       
       if (resUpdate.getKvs().size() == 0) {
         /*if no one prior, the lock is ours*/
@@ -156,7 +164,12 @@ public class UMutex extends Mutex {
         }
       }
       /*now we have found the predecessor to set a watch on*/
-      watchPredecessor(predecessor.getKey().toString(), client, resRev);      
+      try {
+        watchPredecessor(predecessor.getKey(), client, resRev);
+      } catch (WatchLostException e) {
+        /*if the watch got lost, no big deal, just continue with the loop and try again*/
+        System.out.println(e.getMessage());
+      }
     }
   }
   
@@ -222,11 +235,11 @@ public class UMutex extends Mutex {
         .withPrefix(ByteSequence.fromString(prefix)).build();
   }
   
-  private GetOption withLastMaxCreate(String prefix, long maxcreateRev) {
+  private GetOption withLastMaxCreate(ByteSequence prefix, long maxcreateRev) {
     return GetOption.newBuilder().withLimit(1)
         .withSortOrder(SortOrder.DESCEND)
         .withSortField(SortTarget.CREATE)
-        .withPrefix(ByteSequence.fromString(prefix))
+        .withPrefix(prefix)
         .withMaxCreateRevision(maxcreateRev)
         .build();
   }
