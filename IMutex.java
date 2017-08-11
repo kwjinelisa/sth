@@ -77,7 +77,7 @@ public class IMutex extends Mutex {
     }
     
     /* wait for contenders prior to me to go away to acquire the lock*/
-    header = waitForContendersToGo(myrevision - 1, myclient); 
+    header = waitForContendersToGo(myrevision - 1); 
 
     if (header == null) {
       this.unlock();
@@ -90,29 +90,16 @@ public class IMutex extends Mutex {
     
   }
 
-  @Override
-  public void unlock() throws Exception {
-    mysession.closeListener();
-    Client client = mysession.getClient();
-    KV kvclient = client.getKVClient();
-    kvclient.delete(mykkey).get();
-    mykey = null;
-    mykkey = null;
-    myrevision = -1;
-    isOwner = false;
-  }
-
-  private Header waitForContendersToGo(long maxCreateRev, Client client) 
+  private Header waitForContendersToGo(long maxCreateRev) 
       throws InterruptedException, ExecutionException, EtcdException {
-    //my contenders are insertion and deletion locks in the same directory
-    ByteSequence pfxUpdate = ByteSequence.fromString(myprefix + "/update/");
-    ByteSequence pfxInsert = ByteSequence.fromString(myprefix + "/insert/");
-    GetOption optionU = withLastMaxCreate(pfxUpdate, maxCreateRev);
-    GetOption optionI = withLastMaxCreate(pfxInsert, maxCreateRev);
-    
+    /*my contenders are insertion and deletion locks in the same directory
+     * find the one contender whose create revision is:
+     * 1.smaller than my revision
+     * 2.highest among all contenders that fulfill condition 1 
+     */
     final Cmp CMP = new Cmp(mykkey, Cmp.Op.EQUAL,CmpTarget.createRevision(0));    
-    Op getUpdate = Op.get(pfxUpdate, optionU);
-    Op getInsert = Op.get(pfxInsert, optionI);
+    Op getUpdate = opWithLastMaxCreate(myprefix + "/update/", maxCreateRev);
+    Op getInsert = opWithLastMaxCreate(myprefix + "/insert/", maxCreateRev);
     
     while (true) {
       KeyValue predecessor;
@@ -155,26 +142,11 @@ public class IMutex extends Mutex {
       }
       /*now we have found the contender to set a watch on*/
       try {
-        setWatch(predecessor.getKey(), client, resRev);
+        setWatch(predecessor.getKey(), resRev);
       } catch (WatchLostException e) {
         /*if the watch got lost, no big deal, just continue with the loop and try again*/
         System.out.println(e.getMessage());
       }
-    }
-  }
-  
-  private void setWatch(ByteSequence key, Client client, long revision) 
-      throws CompactedException, EtcdException {
-    /*wait for the contender to go away*/
-    Watcher watcher = client.getWatchClient().watch(key, 
-                 WatchOption.newBuilder().withRevision(revision).withNoPut(true).build());
-    try {
-      WatchResponse watchRes = watcher.listen();
-      if (!watchRes.getEvents().get(0).getEventType().equals(EventType.DELETE)) {
-        throw EtcdExceptionFactory.newWatchLostException(key.toStringUtf8());
-      }
-    } finally {
-      watcher.close();
     }
   }
   

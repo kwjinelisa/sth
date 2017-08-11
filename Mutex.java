@@ -2,12 +2,19 @@ package com.coreos.jetcd.concurrency;
 
 import com.coreos.jetcd.Client;
 import com.coreos.jetcd.KV;
+import com.coreos.jetcd.Watch.Watcher;
 import com.coreos.jetcd.data.ByteSequence;
 import com.coreos.jetcd.data.Response.Header;
+import com.coreos.jetcd.exception.CompactedException;
+import com.coreos.jetcd.exception.EtcdException;
+import com.coreos.jetcd.exception.EtcdExceptionFactory;
 import com.coreos.jetcd.op.Op;
 import com.coreos.jetcd.options.GetOption;
+import com.coreos.jetcd.options.WatchOption;
 import com.coreos.jetcd.options.GetOption.SortOrder;
 import com.coreos.jetcd.options.GetOption.SortTarget;
+import com.coreos.jetcd.watch.WatchResponse;
+import com.coreos.jetcd.watch.WatchEvent.EventType;
 
 public abstract class Mutex {
   protected String myprefix;
@@ -48,10 +55,34 @@ public abstract class Mutex {
   
   public abstract boolean lock() throws Exception;
   
-  public abstract void unlock() throws Exception;
+  public void unlock() throws Exception {
+    mysession.closeListener();
+    Client client = mysession.getClient();
+    KV kvclient = client.getKVClient();
+    kvclient.delete(mykkey).get();
+    mykey = null;
+    mykkey = null;
+    myrevision = -1;
+    isOwner = false;
+  }
   
   public boolean isOwner() {
     return isOwner;
+  }
+  
+  protected void setWatch(ByteSequence key, long revision) 
+      throws CompactedException, EtcdException {
+    /*wait for the contender to go away*/
+    Watcher watcher = myclient.getWatchClient().watch(key, 
+                 WatchOption.newBuilder().withRevision(revision).withNoPut(true).build());
+    try {
+      WatchResponse watchRes = watcher.listen();
+      if (!watchRes.getEvents().get(0).getEventType().equals(EventType.DELETE)) {
+        throw EtcdExceptionFactory.newWatchLostException(key.toStringUtf8());
+      }
+    } finally {
+      watcher.close();
+    }
   }
   
   protected Op opWithFirstCreate(String prefix) {
@@ -66,6 +97,11 @@ public abstract class Mutex {
         .withPrefix(prefix).build();
   }
   
+  protected Op opWithLastMaxCreate(String prefix, long maxCreateRev) {
+    ByteSequence pprefix = ByteSequence.fromString(prefix); 
+    return Op.get(pprefix, withLastMaxCreate(pprefix, maxCreateRev));
+  }
+   
   protected GetOption withLastMaxCreate(ByteSequence prefix, long maxcreateRev) {
     return GetOption.newBuilder().withLimit(1)
         .withSortOrder(SortOrder.DESCEND)
