@@ -71,12 +71,12 @@ public class LockTest extends AbstractConcurrencyTest{
     Mutex secondOwnerMutex = newUpdateMutexfromClient(client, path);
     
     /*launch a new thread to lock the first owner*/
-    Thread firstOwnerThread = newLockThread(firstOwnerMutex, true);
+    Thread firstOwnerThread = newLockThread(firstOwnerMutex, false);
     firstOwnerThread.start();
     
     /*launch a new thread to lock the victim, which will be blocked*/
     firstOwnerThread.join(1000);
-    Thread victimThread = newLockThread(victimMutex, true);
+    Thread victimThread = newLockThread(victimMutex, false);
     victimThread.start(); 
     
     Watcher watcher =  newWatcherwithPfxRev(PATH, firstOwnerMutex.getRev()); 
@@ -86,7 +86,7 @@ public class LockTest extends AbstractConcurrencyTest{
 
     
     /*launch a new thread to lock the secondowner, which will be blocked*/
-    Thread secondOwnerThread = newLockThread(secondOwnerMutex, true);
+    Thread secondOwnerThread = newLockThread(secondOwnerMutex, false);
     secondOwnerThread.start(); 
     getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
     

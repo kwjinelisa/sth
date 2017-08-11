@@ -1,9 +1,5 @@
 package com.coreos.jetcd.concurrency;
 
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-
 import com.coreos.jetcd.Client;
 import com.coreos.jetcd.KV;
 import com.coreos.jetcd.Watch.Watcher;
@@ -20,12 +16,15 @@ import com.coreos.jetcd.op.Cmp;
 import com.coreos.jetcd.op.CmpTarget;
 import com.coreos.jetcd.op.Op;
 import com.coreos.jetcd.options.GetOption;
-import com.coreos.jetcd.options.PutOption;
 import com.coreos.jetcd.options.GetOption.SortOrder;
 import com.coreos.jetcd.options.GetOption.SortTarget;
+import com.coreos.jetcd.options.PutOption;
 import com.coreos.jetcd.options.WatchOption;
 import com.coreos.jetcd.watch.WatchEvent.EventType;
 import com.coreos.jetcd.watch.WatchResponse;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 public abstract class Mutex {
   protected String myprefix;
@@ -92,8 +91,10 @@ public abstract class Mutex {
     header = waitForContendersToGo(myrevision - 1); 
 
     if (header == null) {
+      String temp = mykey;
       this.unlock();
-      throw EtcdExceptionFactory.newEtcdException("the lock got deleted during the lock() function "
+      throw EtcdExceptionFactory.newEtcdException("the key " + temp 
+          + " got deleted during the lock() function "
           + "probably due to inactive session, renounce or retry");
     }
 
