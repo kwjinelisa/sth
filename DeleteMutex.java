@@ -10,20 +10,21 @@ package com.coreos.jetcd.concurrency;
 
 import com.coreos.jetcd.op.Op;
 
-public class InsertAndUpdateMutex extends Mutex {
 
-  protected InsertAndUpdateMutex(String prefix, Session session, String lockType) {
-    super(prefix,  session,  lockType);
+
+public class DeleteMutex extends Mutex {
+
+  protected DeleteMutex(String prefix, Session session, String lockType) {
+    super(prefix, session, lockType);
   }
   
   protected Op[] getOtherContendersOp() {
-    return new Op[]{opWithFirstCreate(myprefix + "/update/"),
-        opWithFirstCreate(myprefix + "/insert/")};
+    return new Op[]{opWithFirstCreate(myprefix)};
   }
   
   protected Op[] getContendersImmediatelyBefore(long maxCreateRev) {
-    return new Op[]{opWithLastMaxCreate(myprefix + "/update/", maxCreateRev),
-        opWithLastMaxCreate(myprefix + "/insert/", maxCreateRev)};
+    return new Op[]{opWithLastMaxCreate(myprefix, maxCreateRev)};
   }
+
 
 }
