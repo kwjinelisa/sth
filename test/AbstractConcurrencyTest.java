@@ -101,10 +101,13 @@ public abstract class AbstractConcurrencyTest {
     return future.get(1, TimeUnit.SECONDS);
   }
   
-  protected Mutex newUMutexfromClient(Client client, String prefix) throws InterruptedException, ExecutionException {
-    return newMutexfromClient(client, prefix, Mutex::newUMutex);
+  protected Mutex newUpdateMutexfromClient(Client client, String prefix) throws InterruptedException, ExecutionException {
+    return newMutexfromClient(client, prefix, Mutex::newUpdateMutex);
   }
   
+  protected Mutex newInsertionMutexfromClient(Client client, String prefix) throws InterruptedException, ExecutionException {
+    return newMutexfromClient(client, prefix, Mutex::newInsertionMutex);
+  }
   protected Mutex newMutexfromClient(Client client, String prefix, MutexFactory factory)
       throws InterruptedException, ExecutionException{ 
     Session session = Session.newBuilder().setClient(client).build();

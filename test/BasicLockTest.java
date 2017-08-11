@@ -21,7 +21,7 @@ public class BasicLockTest extends AbstractConcurrencyTest {
   public void testLockUnlock() throws Exception {
     ExecutorService executor = Executors.newSingleThreadExecutor();
 
-    Mutex owner = newUMutexfromClient(client, path);
+    Mutex owner = newUpdateMutexfromClient(client, path);
     Thread lockThread = newLockThread(owner, false);
     lockThread.start();
     lockThread.join();

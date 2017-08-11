@@ -10,11 +10,11 @@ import com.coreos.jetcd.exception.EtcdException;
 import com.coreos.jetcd.exception.EtcdExceptionFactory;
 import com.coreos.jetcd.op.Op;
 import com.coreos.jetcd.options.GetOption;
-import com.coreos.jetcd.options.WatchOption;
 import com.coreos.jetcd.options.GetOption.SortOrder;
 import com.coreos.jetcd.options.GetOption.SortTarget;
-import com.coreos.jetcd.watch.WatchResponse;
+import com.coreos.jetcd.options.WatchOption;
 import com.coreos.jetcd.watch.WatchEvent.EventType;
+import com.coreos.jetcd.watch.WatchResponse;
 
 public abstract class Mutex {
   protected String myprefix;
@@ -36,8 +36,12 @@ public abstract class Mutex {
     myKvclient = myclient.getKVClient();
   }
 
-  public static Mutex newUMutex(String prefix, Session session) {
-    return new UMutex(prefix, session, "update");
+  public static Mutex newUpdateMutex(String prefix, Session session) {
+    return new IMutex(prefix, session, "update");
+  }
+  
+  public static Mutex newInsertionMutex(String prefix, Session session) {
+    return new IMutex(prefix, session, "insert");
   }
   
   
@@ -57,9 +61,7 @@ public abstract class Mutex {
   
   public void unlock() throws Exception {
     mysession.closeListener();
-    Client client = mysession.getClient();
-    KV kvclient = client.getKVClient();
-    kvclient.delete(mykkey).get();
+    myKvclient.delete(mykkey).get();
     mykey = null;
     mykkey = null;
     myrevision = -1;

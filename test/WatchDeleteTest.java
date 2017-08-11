@@ -46,7 +46,7 @@ public class WatchDeleteTest extends AbstractConcurrencyTest {
     test.assertEquals(list.get(0).getKeyValue().getKey(), KEY1);
     
     /*try to lock the mutex*/
-    Mutex owner = newUMutexfromClient(client, path);
+    Mutex owner = newUpdateMutexfromClient(client, path);
     Thread ownerlockThread = newLockThread(owner, false);
     ownerlockThread.start();
     list = getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
@@ -83,7 +83,7 @@ public class WatchDeleteTest extends AbstractConcurrencyTest {
     putWithLease(KEY2,lease);
     getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
     /*try to lock*/
-    Mutex owner = newUMutexfromClient(client, path);
+    Mutex owner = newUpdateMutexfromClient(client, path);
     Thread ownerlockThread = newLockThread(owner, false);
     ownerlockThread.start();
     getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
@@ -108,7 +108,7 @@ public class WatchDeleteTest extends AbstractConcurrencyTest {
     Watcher watcher = putNKeysInRollwithLease(N, lease, executor, null);
     
     /*try to lock*/
-    Mutex owner = newUMutexfromClient(client, path);
+    Mutex owner = newUpdateMutexfromClient(client, path);
     Thread ownerlockThread = newLockThread(owner, false);
     ownerlockThread.start();
     getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);

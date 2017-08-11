@@ -8,13 +8,9 @@
 
 package com.coreos.jetcd.concurrency;
 
-import com.coreos.jetcd.Client;
-import com.coreos.jetcd.KV;
-import com.coreos.jetcd.Watch.Watcher;
 import com.coreos.jetcd.data.ByteSequence;
 import com.coreos.jetcd.data.KeyValue;
 import com.coreos.jetcd.data.Response.Header;
-import com.coreos.jetcd.exception.CompactedException;
 import com.coreos.jetcd.exception.EtcdException;
 import com.coreos.jetcd.exception.EtcdExceptionFactory;
 import com.coreos.jetcd.exception.WatchLostException;
@@ -25,9 +21,6 @@ import com.coreos.jetcd.op.CmpTarget;
 import com.coreos.jetcd.op.Op;
 import com.coreos.jetcd.options.GetOption;
 import com.coreos.jetcd.options.PutOption;
-import com.coreos.jetcd.options.WatchOption;
-import com.coreos.jetcd.watch.WatchEvent.EventType;
-import com.coreos.jetcd.watch.WatchResponse;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -59,8 +52,6 @@ public class IMutex extends Mutex {
       contenderStartingIndex = 1;
       myrevision = txnRes.getGetResponses().get(0).getKvs().get(0).getCreateRevision();
     }
-    
-    
     
     KeyValue ownerKV = getOwnerKV(txnRes.getGetResponses(), contenderStartingIndex);
     /*if a Delete lock encompassing our update lock was found, 
