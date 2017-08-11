@@ -37,11 +37,11 @@ public abstract class Mutex {
   }
 
   public static Mutex newUpdateMutex(String prefix, Session session) {
-    return new IMutex(prefix, session, "update");
+    return new InsertAndUpdateMutex(prefix, session, "update");
   }
   
   public static Mutex newInsertionMutex(String prefix, Session session) {
-    return new IMutex(prefix, session, "insert");
+    return new InsertAndUpdateMutex(prefix, session, "insert");
   }
   
   

@@ -66,7 +66,6 @@ public class LockTest extends AbstractConcurrencyTest{
   @Test
   /*testcase where the waiter prior to the acquirer expires before the current holder.*/
   public void test3Ulocks() throws Exception {
-
     Mutex firstOwnerMutex = newInsertionMutexfromClient(client, path);
     Mutex victimMutex = newInsertionMutexfromClient(client, path);
     Mutex secondOwnerMutex = newUpdateMutexfromClient(client, path);
@@ -110,8 +109,6 @@ public class LockTest extends AbstractConcurrencyTest{
     
     /*verify that the victim thread has terminated without acquiring the lock*/
     victimThread.join(1000);
-    test.assertTrue(!victimMutex.isOwner());
-      
-    
+    test.assertTrue(!victimMutex.isOwner());    
   }
 }
