@@ -22,8 +22,10 @@ public class InsertAndUpdateMutex extends Mutex {
   }
   
   protected Op[] getContendersImmediatelyBefore(long maxCreateRev) {
-    return new Op[]{opWithLastMaxCreate(myprefix + "/update/", maxCreateRev),
+    Op[] getDeletes = deletesWithLastMaxCreate(maxCreateRev);
+    Op[] getUpdateInsert = {opWithLastMaxCreate(myprefix + "/update/", maxCreateRev),
         opWithLastMaxCreate(myprefix + "/insert/", maxCreateRev)};
+    return concat(getDeletes, getUpdateInsert);
   }
 
 }

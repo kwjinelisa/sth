@@ -23,7 +23,9 @@ public class DeleteMutex extends Mutex {
   }
   
   protected Op[] getContendersImmediatelyBefore(long maxCreateRev) {
-    return new Op[]{opWithLastMaxCreate(myprefix, maxCreateRev)};
+    Op[] getDeletes = deletesWithLastMaxCreate(maxCreateRev);
+    Op[] others = new Op[]{opWithLastMaxCreate(myprefix, maxCreateRev)};
+    return concat(getDeletes, others);
   }
 
 

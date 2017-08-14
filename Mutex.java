@@ -133,12 +133,6 @@ public abstract class Mutex {
         KeyValue candidateKV = candidateKVs.get(0);
         long candidateCreate = candidateKV.getCreateRevision();
         if (candidateCreate > 0 && candidateCreate <= myrevision) {
-          /* if we find a delete lock created prior to our update lock and 
-           * encompassing our path, no need to search further,
-           * our update lock should be canceled*/
-          if (i < getRes.size() - 1) {
-            return candidateKV;
-          }
           if (ownerCreateRevision == 0 || candidateCreate < ownerCreateRevision) {
             ownerCreateRevision = candidateCreate;
             ownerKV = candidateKV;
@@ -175,11 +169,12 @@ public abstract class Mutex {
   protected Header waitForContendersToGo(long maxCreateRev) 
       throws InterruptedException, ExecutionException, EtcdException {
     /*my contenders are insertion and deletion locks in the same directory
+     * and delete locks encompassing my lock
      * find the one contender whose create revision is:
      * 1.smaller than my revision
      * 2.highest among all contenders that fulfill condition 1 
      */
-    final Cmp CMP = new Cmp(mykkey, Cmp.Op.EQUAL,CmpTarget.createRevision(0));    
+    final Cmp CMP = new Cmp(mykkey, Cmp.Op.EQUAL,CmpTarget.version(0));    
     Op[] getContenders = getContendersImmediatelyBefore(maxCreateRev);
     
     while (true) {
@@ -238,19 +233,19 @@ public abstract class Mutex {
   protected Op[] getAllContenders() {
     /*a delete lock in the parent path is a contender
      *  no matter the lock type*/
-    Op[] getDeleteContenders = opsForDeletes();
+    Op[] getDeleteContenders = deletesWithFirstCreate();
     //other contenders depend on the lock type
     Op[] others =  getOtherContendersOp();
     return concat(getDeleteContenders, others);
   }
   
-  protected Op[] opsForDeletes() {
+  protected Op[] deletesWithFirstCreate() {
     String[] parts = myprefix.split("/");
     int len = parts.length;
     Op[] getLockDelete = new Op[len + 1];
     
     String start = "";
-    getLockDelete[0] = opWithFirstCreate(start + "delete/");
+    getLockDelete[0] = opWithFirstCreate("delete/");
 
     for (int i = 0;i < len;i++) {
       start = start + parts[i] + "/";
@@ -258,6 +253,23 @@ public abstract class Mutex {
       getLockDelete[i + 1] = opWithFirstCreate(prefix);
     }
     return getLockDelete;
+  }
+  
+  
+  protected Op[] deletesWithLastMaxCreate(long maxCreateRev) {
+    String[] parts = myprefix.split("/");
+    int len = parts.length;
+    Op[] getDeletes = new Op[len + 1];
+    
+    String start = "";
+    getDeletes[0] = opWithLastMaxCreate("delete/", maxCreateRev);
+
+    for (int i = 0;i < len;i++) {
+      start = start + parts[i] + "/";
+      String prefix = start + "delete/";
+      getDeletes[i + 1] = opWithLastMaxCreate(prefix, maxCreateRev);
+    }
+    return getDeletes;
   }
   
   protected Op opWithFirstCreate(String prefix) {
