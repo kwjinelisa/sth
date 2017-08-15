@@ -22,6 +22,8 @@ import com.coreos.jetcd.options.PutOption;
 import com.coreos.jetcd.options.WatchOption;
 import com.coreos.jetcd.watch.WatchEvent.EventType;
 import com.coreos.jetcd.watch.WatchResponse;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -36,6 +38,7 @@ public abstract class Mutex {
   protected Header header;
   protected boolean isOwner;
   protected KV myKvclient;
+  protected String[] contenderPaths;
     
   protected Mutex(String prefix, Session session, String lockType) {
     myprefix = prefix;
@@ -47,11 +50,11 @@ public abstract class Mutex {
   }
 
   public static Mutex newUpdateMutex(String prefix, Session session) {
-    return new InsertAndUpdateMutex(prefix, session, "update");
+    return new UpdateMutex(prefix, session, "update");
   }
   
   public static Mutex newInsertionMutex(String prefix, Session session) {
-    return new InsertAndUpdateMutex(prefix, session, "insert");
+    return new InsertMutex(prefix, session, "insert");
   }
   
   public static Mutex newDeleteMutex(String prefix, Session session) {
@@ -64,7 +67,7 @@ public abstract class Mutex {
         PutOption.newBuilder().withLeaseId(mysession.getLease()).build());
     final Op get = Op.get(mykkey, GetOption.DEFAULT);
     
-    final Op[] getOwner = getAllContenders();
+    final Op[] getOwner = contendersFirstCreate();
     final Op[] thenOps = concat(put, getOwner);
     final Op[] elseOps = concat(get, getOwner);
     
@@ -115,24 +118,20 @@ public abstract class Mutex {
     return isOwner;
   }
   
-  protected abstract Op[] getOtherContendersOp(); 
-  
-  /*return a collection of Ops for getting the most recently created locks
-   *  respectively in each path, each Op represents a path to inspect
-   *  the choice of paths to search depends on the lock type
-   *  each Op will generate a GetResponse in the Txn response*/
-  protected abstract Op[] getContendersImmediatelyBefore(long maxCreateRev);
-
-  
+  protected abstract Op[] otherContendersFirstCreate(); 
+    
   protected KeyValue getOwnerKV(List<GetResponse> getRes, int startIndex) {
     KeyValue ownerKV = null;
     long ownerCreateRevision = 0;
+    List<String> paths = new ArrayList<String>();
     for (int i = startIndex; i < getRes.size(); i++) {
       List<KeyValue> candidateKVs = getRes.get(i).getKvs();
       if (candidateKVs.size() != 0) {
         KeyValue candidateKV = candidateKVs.get(0);
         long candidateCreate = candidateKV.getCreateRevision();
         if (candidateCreate > 0 && candidateCreate <= myrevision) {
+          String path = candidateKV.getKey().toStringUtf8();
+          paths.add(path.substring(0, path.lastIndexOf("/")));
           if (ownerCreateRevision == 0 || candidateCreate < ownerCreateRevision) {
             ownerCreateRevision = candidateCreate;
             ownerKV = candidateKV;
@@ -140,31 +139,10 @@ public abstract class Mutex {
         }
       }
     }
+    contenderPaths = new String[paths.size()];
+    paths.toArray(contenderPaths);
     return ownerKV;
   }
-
-  
-  /*among all the get responses on the list, 
-   * locate the one that is created the most recently
-   * (i.e lock with the biggest create revision)
-   */
-  protected GetResponse findContenderImmediatelyBefore(List<GetResponse> responses) {
-    GetResponse contenderToReturn = null;
-    long maxCreateRev = -1;
-    
-    for (GetResponse r:responses) {
-      if (r.getKvs().size() == 0) {
-        continue;
-      }
-      long rev = r.getKvs().get(0).getCreateRevision();
-      if (maxCreateRev == -1 || rev > maxCreateRev) {
-        contenderToReturn = r;
-        maxCreateRev = rev;
-      } 
-    }
-    return contenderToReturn;
-  }
-  
   
   protected Header waitForContendersToGo(long maxCreateRev) 
       throws InterruptedException, ExecutionException, EtcdException {
@@ -175,7 +153,7 @@ public abstract class Mutex {
      * 2.highest among all contenders that fulfill condition 1 
      */
     final Cmp CMP = new Cmp(mykkey, Cmp.Op.EQUAL,CmpTarget.version(0));    
-    Op[] getContenders = getContendersImmediatelyBefore(maxCreateRev);
+    Op[] getContenders = contendersLastMaxCreate(maxCreateRev);
     
     while (true) {
       KeyValue targetToWatch;
@@ -195,7 +173,7 @@ public abstract class Mutex {
        * if yes, find the one immediately in front of me to set a watch on
        * if no, then I should be the owner of the lock
        */
-      GetResponse target = findContenderImmediatelyBefore(txnRes.getGetResponses());
+      GetResponse target = findMaxCreate(txnRes.getGetResponses());
 
       if (target == null) {
         /*if no one prior, the lock is ours*/
@@ -214,7 +192,7 @@ public abstract class Mutex {
       }
     }
   }
-
+  
   protected void setWatch(ByteSequence key, long revision) 
       throws CompactedException, EtcdException {
     /*wait for the contender to go away*/
@@ -230,48 +208,68 @@ public abstract class Mutex {
     }
   }
   
-  protected Op[] getAllContenders() {
-    /*a delete lock in the parent path is a contender
+  /*among all the get responses on the list, 
+   * locate the one that is created the most recently
+   * (i.e lock with the biggest create revision)
+   */
+  protected GetResponse findMaxCreate(List<GetResponse> responses) {
+    GetResponse contenderToReturn = null;
+    long maxCreateRev = -1;
+    
+    for (GetResponse r:responses) {
+      if (r.getKvs().size() == 0) {
+        continue;
+      }
+      long rev = r.getKvs().get(0).getCreateRevision();
+      if (maxCreateRev == -1 || rev > maxCreateRev) {
+        contenderToReturn = r;
+        maxCreateRev = rev;
+      } 
+    }
+    return contenderToReturn;
+  }
+  
+  
+  protected Op[] contendersFirstCreate() {
+    /*a delete or insert lock in the parent path is a contender
      *  no matter the lock type*/
-    Op[] getDeleteContenders = deletesWithFirstCreate();
+    Op[] getDeleteContenders = deletesAndInsertsInParentPathWithFirstCreate();
     //other contenders depend on the lock type
-    Op[] others =  getOtherContendersOp();
+    Op[] others = otherContendersFirstCreate();
     return concat(getDeleteContenders, others);
   }
   
-  protected Op[] deletesWithFirstCreate() {
-    String[] parts = myprefix.split("/");
-    int len = parts.length;
-    Op[] getLockDelete = new Op[len + 1];
-    
-    String start = "";
-    getLockDelete[0] = opWithFirstCreate("delete/");
-
-    for (int i = 0;i < len;i++) {
-      start = start + parts[i] + "/";
-      String prefix = start + "delete/";
-      getLockDelete[i + 1] = opWithFirstCreate(prefix);
+  /*return a collection of Ops for getting the most recently created locks
+   *  respectively in each path, each Op represents a path to inspect
+   *  the choice of paths to search depends on the lock type
+   *  each Op will generate a GetResponse in the Txn response*/
+  private Op[] contendersLastMaxCreate(long maxCreateRev) {
+    Op[] result = new Op[contenderPaths.length];
+    for (int i = 0;i < contenderPaths.length;i++) {
+      result[i] = opWithLastMaxCreate(contenderPaths[i], maxCreateRev);
     }
-    return getLockDelete;
+    return result;
   }
   
-  
-  protected Op[] deletesWithLastMaxCreate(long maxCreateRev) {
+  protected Op[] deletesAndInsertsInParentPathWithFirstCreate() {
     String[] parts = myprefix.split("/");
     int len = parts.length;
     Op[] getDeletes = new Op[len + 1];
-    
+    Op[] getInserts = new Op[len + 1];
+        
     String start = "";
-    getDeletes[0] = opWithLastMaxCreate("delete/", maxCreateRev);
+    getDeletes[0] = opWithFirstCreate("delete/");
+    getInserts[0] = opWithFirstCreate("insert/");
 
     for (int i = 0;i < len;i++) {
       start = start + parts[i] + "/";
-      String prefix = start + "delete/";
-      getDeletes[i + 1] = opWithLastMaxCreate(prefix, maxCreateRev);
+      getDeletes[i + 1] = opWithFirstCreate(start + "delete/");
+      getInserts[i + 1] = opWithFirstCreate(start + "insert/");
     }
-    return getDeletes;
+    
+    return concat(getDeletes, getInserts);
   }
-  
+   
   protected Op opWithFirstCreate(String prefix) {
     ByteSequence pprefix = ByteSequence.fromString(prefix);
     return Op.get(pprefix, withFirstCreate(pprefix));
@@ -288,7 +286,7 @@ public abstract class Mutex {
     ByteSequence pprefix = ByteSequence.fromString(prefix); 
     return Op.get(pprefix, withLastMaxCreate(pprefix, maxCreateRev));
   }
-   
+  
   protected GetOption withLastMaxCreate(ByteSequence prefix, long maxcreateRev) {
     return GetOption.newBuilder().withLimit(1)
         .withSortOrder(SortOrder.DESCEND)

@@ -10,15 +10,14 @@ package com.coreos.jetcd.concurrency;
 
 import com.coreos.jetcd.op.Op;
 
+public class UpdateMutex extends Mutex {
 
-
-public class DeleteMutex extends Mutex {
-
-  protected DeleteMutex(String prefix, Session session, String lockType) {
-    super(prefix, session, lockType);
+  protected UpdateMutex(String prefix, Session session, String lockType) {
+    super(prefix,  session,  lockType);
   }
   
   protected Op[] otherContendersFirstCreate() {
-    return new Op[]{opWithFirstCreate(myprefix)};
+    return new Op[]{opWithFirstCreate(myprefix + "/update/")};
   }
+
 }

@@ -10,15 +10,16 @@ package com.coreos.jetcd.concurrency;
 
 import com.coreos.jetcd.op.Op;
 
+public class InsertMutex extends Mutex {
 
-
-public class DeleteMutex extends Mutex {
-
-  protected DeleteMutex(String prefix, Session session, String lockType) {
+  protected InsertMutex(String prefix, Session session, String lockType) {
     super(prefix, session, lockType);
   }
-  
+
   protected Op[] otherContendersFirstCreate() {
+    /*all locks that are in levels not higher than a insert lock 
+     *represent a logic error and need to block this insert lock*/
     return new Op[]{opWithFirstCreate(myprefix)};
   }
+
 }
