@@ -15,24 +15,63 @@ import org.testng.annotations.Test;
 import com.coreos.jetcd.Watch.Watcher;
 import com.coreos.jetcd.watch.WatchEvent.EventType;
 
-public class BasicLockTest extends AbstractConcurrencyTest {
+public class SimpleTest extends AbstractConcurrencyTest {
+  private static final String subpath1 = path + "/dirC";
+  private static final String subpath2 = path + "/dirD";
 
   @Test
-  public void testLockUnlock() throws Exception {
+  public void deleteBlocksDelete() throws Exception {
     ExecutorService executor = Executors.newSingleThreadExecutor();
-
-    Mutex owner = newUpdateMutexfromClient(client, path);
-    Thread lockThread = newLockThread(owner, false);
-    lockThread.start();
-    lockThread.join();
-    
-    Watcher watcher =  newWatcherwithPfxRev(PATH, owner.getRev());
-    getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);
-    
-    Thread.sleep(1000);
-    
-    owner.unlock();
-    getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.DELETE);
+    Mutex first = newDeleteMutexfromClient(client, path);
+    Mutex second = newDeleteMutexfromClient(client, subpath1);
+    firstBlocksSecond(first, second, executor, null);
   }
   
+  @Test
+  public void deleteBlocksDelete2() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newDeleteMutexfromClient(client, subpath1);
+    Mutex second = newDeleteMutexfromClient(client, path);
+    firstBlocksSecond(first, second, executor, null);
+  }
+  
+  @Test
+  public void deleteNotBlockDelete() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newDeleteMutexfromClient(client, subpath1);
+    Mutex second = newDeleteMutexfromClient(client, subpath2);
+    firstNotBlockSecond(first, second, executor, null);
+  }
+  
+  @Test
+  public void deleteBlocksUpdate() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newDeleteMutexfromClient(client, path);
+    Mutex second = newUpdateMutexfromClient(client, subpath1);
+    firstBlocksSecond(first, second, executor, null);
+  }
+  
+  @Test
+  public void deleteNotBlockUpdate() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newDeleteMutexfromClient(client, subpath1);
+    Mutex second = newUpdateMutexfromClient(client, subpath2);
+    firstNotBlockSecond(first, second, executor, null);
+  }
+  
+  @Test
+  public void updateBlocksUpdate() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newUpdateMutexfromClient(client, path);
+    Mutex second = newUpdateMutexfromClient(client, path);
+    firstBlocksSecond(first, second, executor, null);
+  }
+  
+  @Test
+  public void updateNotBlockUpdate() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newUpdateMutexfromClient(client, path);
+    Mutex second = newUpdateMutexfromClient(client, subpath1);
+    firstNotBlockSecond(first, second, executor, null);
+  }
 }

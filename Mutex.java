@@ -54,7 +54,7 @@ public abstract class Mutex {
     return new InsertAndUpdateMutex(prefix, session, "insert");
   }
   
-  public static Mutex newDeletMutex(String prefix, Session session) {
+  public static Mutex newDeleteMutex(String prefix, Session session) {
     return new DeleteMutex(prefix, session, "delete");
   } 
   
