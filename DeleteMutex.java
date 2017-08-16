@@ -21,4 +21,13 @@ public class DeleteMutex extends Mutex {
   protected Op[] otherContendersFirstCreate() {
     return new Op[]{opWithFirstCreate(myprefix)};
   }
+  
+  protected Op[] contendersLastMaxCreate(long maxCreateRev) {
+    Op[] result = new Op[contenderPaths.length];
+    for (int i = 0;i < contenderPaths.length - 1;i++) {
+      result[i] = opWithLastMaxCreate(contenderPaths[i], maxCreateRev);
+    }
+    result[contenderPaths.length - 1] = opWithLastMaxCreate(myprefix, maxCreateRev);
+    return result;
+  }
 }

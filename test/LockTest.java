@@ -18,6 +18,61 @@ import com.coreos.jetcd.watch.WatchEvent;
 import com.coreos.jetcd.watch.WatchEvent.EventType;
 
 public class LockTest extends AbstractConcurrencyTest{
+  private static final String path2 = "root/dirC/dirD";
+  
+@Test
+  public void testMixed() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    long revision = kvclient.get(PATH).get().getHeader().getRevision();
+    Watcher watcher = newWatcherwithPfxRev(ByteSequence.fromString("root"), revision+1);
+    
+    Mutex[] mlist = new Mutex[6];
+    Thread[] tlist = new Thread[6];
+
+    mlist[0] = newUpdateMutexfromClient(client, "root/dirA");
+    mlist[1] = newUpdateMutexfromClient(client, "root/dirC");
+    mlist[2] = newInsertionMutexfromClient(client, "root/dirC");
+    mlist[3] = newInsertionMutexfromClient(client, path2);
+    mlist[4] = newDeleteMutexfromClient(client, path);
+    mlist[5] = newDeleteMutexfromClient(client, "root");
+
+    for(int i=0;i<6;i++) {
+      tlist[i] = newLockThread(mlist[i], false);
+      tlist[i].start();
+      getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.PUT);  
+    }
+    
+    tlist[0].join(1000);
+    tlist[1].join(1000);
+    test.assertTrue(tlist[2].isAlive());
+    test.assertTrue(tlist[3].isAlive());
+    tlist[4].join(1000);
+    test.assertTrue(tlist[5].isAlive());
+    
+    mlist[1].unlock();
+    getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.DELETE);
+    tlist[2].join(1000);
+    Thread.sleep(1000);
+    test.assertTrue(tlist[3].isAlive());
+    
+    mlist[4].unlock();
+    Thread.sleep(1000);
+    test.assertTrue(tlist[5].isAlive());
+    mlist[2].unlock();
+    getEventsFromWatcherAndVerify(watcher, executor, 2, EventType.DELETE);
+    tlist[3].join(1000);
+    Thread.sleep(1000);
+    test.assertTrue(tlist[5].isAlive());
+    
+    mlist[0].unlock();
+    getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.DELETE);
+    Thread.sleep(1000);
+    test.assertTrue(tlist[5].isAlive());
+    mlist[3].unlock();
+    getEventsFromWatcherAndVerify(watcher, executor, 1, EventType.DELETE);
+    tlist[5].join(1000);
+    mlist[5].unlock();
+  }
 
   @Test
   public void test2Ulocks() throws Exception{

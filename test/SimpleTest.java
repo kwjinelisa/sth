@@ -60,6 +60,30 @@ public class SimpleTest extends AbstractConcurrencyTest {
   }
   
   @Test
+  public void deleteNotBlockUpdate2() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newDeleteMutexfromClient(client, subpath1);
+    Mutex second = newUpdateMutexfromClient(client,path);
+    firstNotBlockSecond(first, second, executor, null);
+  }
+  
+  @Test
+  public void deleteBlocksInsert() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newDeleteMutexfromClient(client, subpath1);
+    Mutex second = newInsertionMutexfromClient(client, path);
+    firstBlocksSecond(first, second, executor, null);
+  }
+  
+  @Test
+  public void deleteBlocksInsert2() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newDeleteMutexfromClient(client, path);
+    Mutex second = newInsertionMutexfromClient(client, subpath2);
+    firstBlocksSecond(first, second, executor, null);
+  }
+  
+  @Test
   public void updateBlocksUpdate() throws Exception {
     ExecutorService executor = Executors.newSingleThreadExecutor();
     Mutex first = newUpdateMutexfromClient(client, path);
@@ -68,10 +92,26 @@ public class SimpleTest extends AbstractConcurrencyTest {
   }
   
   @Test
+  public void updateBlocksInsert() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newUpdateMutexfromClient(client, subpath1);
+    Mutex second = newInsertionMutexfromClient(client, path);
+    firstBlocksSecond(first, second, executor, null);
+  }
+  
+  @Test
   public void updateNotBlockUpdate() throws Exception {
     ExecutorService executor = Executors.newSingleThreadExecutor();
     Mutex first = newUpdateMutexfromClient(client, path);
     Mutex second = newUpdateMutexfromClient(client, subpath1);
+    firstNotBlockSecond(first, second, executor, null);
+  }
+  
+  @Test
+  public void updateNotBlockInsert() throws Exception {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Mutex first = newUpdateMutexfromClient(client, path);
+    Mutex second = newInsertionMutexfromClient(client, subpath1);
     firstNotBlockSecond(first, second, executor, null);
   }
 }

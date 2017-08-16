@@ -119,6 +119,12 @@ public abstract class Mutex {
   }
   
   protected abstract Op[] otherContendersFirstCreate(); 
+  
+  /*return a collection of Ops for getting the most recently created locks
+   *  respectively in each path, each Op represents a path to inspect
+   *  the choice of paths to search depends on the lock type
+   *  each Op will generate a GetResponse in the Txn response*/
+  protected abstract Op[] contendersLastMaxCreate(long maxCreateRev);
     
   protected KeyValue getOwnerKV(List<GetResponse> getRes, int startIndex) {
     KeyValue ownerKV = null;
@@ -239,32 +245,17 @@ public abstract class Mutex {
     return concat(getDeleteContenders, others);
   }
   
-  /*return a collection of Ops for getting the most recently created locks
-   *  respectively in each path, each Op represents a path to inspect
-   *  the choice of paths to search depends on the lock type
-   *  each Op will generate a GetResponse in the Txn response*/
-  private Op[] contendersLastMaxCreate(long maxCreateRev) {
-    Op[] result = new Op[contenderPaths.length];
-    for (int i = 0;i < contenderPaths.length;i++) {
-      result[i] = opWithLastMaxCreate(contenderPaths[i], maxCreateRev);
-    }
-    return result;
-  }
-  
   protected Op[] deletesAndInsertsInParentPathWithFirstCreate() {
     String[] parts = myprefix.split("/");
     int len = parts.length;
-    Op[] getDeletes = new Op[len + 1];
-    Op[] getInserts = new Op[len + 1];
+    Op[] getDeletes = new Op[len];
+    Op[] getInserts = new Op[len];
         
     String start = "";
-    getDeletes[0] = opWithFirstCreate("delete/");
-    getInserts[0] = opWithFirstCreate("insert/");
-
     for (int i = 0;i < len;i++) {
       start = start + parts[i] + "/";
-      getDeletes[i + 1] = opWithFirstCreate(start + "delete/");
-      getInserts[i + 1] = opWithFirstCreate(start + "insert/");
+      getDeletes[i] = opWithFirstCreate(start + "delete/");
+      getInserts[i] = opWithFirstCreate(start + "insert/");
     }
     
     return concat(getDeletes, getInserts);

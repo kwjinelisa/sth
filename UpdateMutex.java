@@ -19,5 +19,13 @@ public class UpdateMutex extends Mutex {
   protected Op[] otherContendersFirstCreate() {
     return new Op[]{opWithFirstCreate(myprefix + "/update/")};
   }
+  
+  protected Op[] contendersLastMaxCreate(long maxCreateRev) {
+    Op[] result = new Op[contenderPaths.length];
+    for (int i = 0;i < contenderPaths.length;i++) {
+      result[i] = opWithLastMaxCreate(contenderPaths[i], maxCreateRev);
+    }
+    return result;
+  }
 
 }
